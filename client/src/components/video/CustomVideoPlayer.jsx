@@ -10,13 +10,25 @@ import {
   Minimize,
   Settings,
   MessageSquare,
-  Sparkles
+  Sparkles,
+  Pencil,
+  Eye,
+  EyeOff,
+  Paintbrush
 } from 'lucide-react';
+import AnnotationCanvas from './AnnotationCanvas';
+import AnnotationToolbar from './AnnotationToolbar';
 
 const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
   {
     videoUrl,
     comments = [],
+    savedAnnotations = [],
+    activeShapes = [],
+    onShapesChange,
+    activeCommentId = null,
+    isAnnotating = false,
+    setIsAnnotating,
     onTimeUpdate,
     onPause,
     onSeek,
@@ -38,6 +50,24 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
   const [hoverPosition, setHoverPosition] = useState(0);
   const [activeTooltip, setActiveTooltip] = useState(null);
 
+  // Annotation state
+  const [activeTool, setActiveTool] = useState('FREE_DRAW');
+  const [activeColor, setActiveColor] = useState('#f59e0b');
+  const [strokeWidth, setStrokeWidth] = useState(3);
+  const [isAnnotationsVisible, setIsAnnotationsVisible] = useState(true);
+
+  const handleUndoShape = () => {
+    if (activeShapes && activeShapes.length > 0 && onShapesChange) {
+      onShapesChange(activeShapes.slice(0, -1));
+    }
+  };
+
+  const handleClearShapes = () => {
+    if (onShapesChange) {
+      onShapesChange([]);
+    }
+  };
+
   // Expose player methods to parent component
   useImperativeHandle(ref, () => ({
     seekTo: (timeInSeconds) => {
@@ -47,6 +77,16 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
         videoRef.current.pause();
         setIsPlaying(false);
       }
+    },
+    openAnnotation: () => {
+      if (videoRef.current) {
+        videoRef.current.pause();
+        setIsPlaying(false);
+      }
+      if (setIsAnnotating) setIsAnnotating(true);
+    },
+    closeAnnotation: () => {
+      if (setIsAnnotating) setIsAnnotating(false);
     },
     getCurrentTime: () => {
       return videoRef.current ? videoRef.current.currentTime : 0;
@@ -215,10 +255,12 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
       id="videoflow-player-wrapper"
       className="relative rounded-2xl overflow-hidden bg-black border border-slate-800 shadow-2xl flex flex-col group select-none"
     >
-      {/* HTML5 Video Element */}
+      {/* HTML5 Video Element with Canvas Overlay */}
       <div
-        className="relative flex-1 flex items-center justify-center bg-black cursor-pointer aspect-video"
-        onClick={togglePlay}
+        className="relative flex-1 flex items-center justify-center bg-black aspect-video overflow-hidden"
+        onClick={() => {
+          if (!isAnnotating) togglePlay();
+        }}
       >
         <video
           ref={videoRef}
@@ -230,8 +272,47 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
           className="w-full h-full object-contain"
         />
 
-        {/* Big play button overlay when paused */}
-        {!isPlaying && (
+        {/* Canvas Markup Overlay */}
+        <AnnotationCanvas
+          videoRef={videoRef}
+          isDrawingMode={isAnnotating}
+          activeTool={activeTool}
+          activeColor={activeColor}
+          strokeWidth={strokeWidth}
+          activeShapes={activeShapes}
+          onShapesChange={onShapesChange}
+          savedAnnotations={savedAnnotations}
+          currentTime={currentTime}
+          activeCommentId={activeCommentId}
+          isVisible={isAnnotationsVisible}
+        />
+
+        {/* Floating Annotation Toolbar */}
+        {isAnnotating && (
+          <div
+            className="absolute top-3 left-3 right-3 z-30 flex justify-center pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <AnnotationToolbar
+              activeTool={activeTool}
+              setActiveTool={setActiveTool}
+              activeColor={activeColor}
+              setActiveColor={setActiveColor}
+              strokeWidth={strokeWidth}
+              setStrokeWidth={setStrokeWidth}
+              onUndo={handleUndoShape}
+              onClear={handleClearShapes}
+              canUndo={activeShapes && activeShapes.length > 0}
+              canClear={activeShapes && activeShapes.length > 0}
+              isVisible={isAnnotationsVisible}
+              setIsVisible={setIsAnnotationsVisible}
+              onClose={() => setIsAnnotating && setIsAnnotating(false)}
+            />
+          </div>
+        )}
+
+        {/* Big play button overlay when paused & not annotating */}
+        {!isPlaying && !isAnnotating && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/20 pointer-events-none">
             <div className="w-16 h-16 rounded-full bg-brand-600/90 backdrop-blur-md text-white flex items-center justify-center shadow-glow animate-in zoom-in-75 duration-150">
               <Play className="w-7 h-7 fill-white ml-1" />
@@ -274,6 +355,8 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
             comments.map((c) => {
               const markerPercent = (c.timestamp / duration) * 100;
               const isResolved = c.status === 'RESOLVED';
+              const hasMarkup = c.hasAnnotation || c.annotationId;
+
               return (
                 <div
                   key={c._id}
@@ -283,22 +366,38 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
                   }}
                   onMouseEnter={() => setActiveTooltip(c._id)}
                   onMouseLeave={() => setActiveTooltip(null)}
-                  className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3 h-3 rounded-full border border-slate-950 transition-all z-20 cursor-pointer ${
+                  className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full transition-all z-20 cursor-pointer flex items-center justify-center ${
                     isResolved
-                      ? 'bg-emerald-400 hover:bg-emerald-300 shadow-glow-emerald hover:scale-150 opacity-80'
-                      : 'bg-amber-400 hover:bg-amber-300 shadow-glow hover:scale-150'
+                      ? 'bg-emerald-400 hover:bg-emerald-300 shadow-glow-emerald hover:scale-150 opacity-80 border border-slate-950'
+                      : hasMarkup
+                      ? 'bg-rose-500 ring-2 ring-amber-400 hover:scale-150 shadow-glow border border-white'
+                      : 'bg-amber-400 hover:bg-amber-300 shadow-glow hover:scale-150 border border-slate-950'
                   }`}
                   style={{ left: `${markerPercent}%` }}
                 >
                   {/* Tooltip on marker hover */}
                   {activeTooltip === c._id && (
-                    <div className="absolute -top-14 left-1/2 -translate-x-1/2 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-left text-[11px] text-white shadow-2xl pointer-events-none whitespace-nowrap z-40 space-y-0.5">
+                    <div className="absolute -top-16 left-1/2 -translate-x-1/2 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-left text-[11px] text-white shadow-2xl pointer-events-none whitespace-nowrap z-40 space-y-1">
                       <div className="flex items-center gap-2 text-[10px]">
-                        <span className={`px-1 rounded font-bold uppercase ${isResolved ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                        <span
+                          className={`px-1 rounded font-bold uppercase ${
+                            isResolved
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-amber-500/20 text-amber-300'
+                          }`}
+                        >
                           {isResolved ? 'Resolved' : 'Open'}
                         </span>
-                        <span className="font-mono text-slate-300 font-bold">{formatTime(c.timestamp)}</span>
+                        <span className="font-mono text-slate-300 font-bold">
+                          {formatTime(c.timestamp)}
+                        </span>
                         <span className="text-slate-400">• {c.userId?.name}</span>
+                        {hasMarkup && (
+                          <span className="px-1 py-0.2 rounded bg-rose-500/20 text-rose-300 font-semibold text-[9px] flex items-center gap-0.5">
+                            <Paintbrush className="w-2.5 h-2.5" />
+                            <span>Markup</span>
+                          </span>
+                        )}
                       </div>
                       <p className="text-slate-300 text-[10px] max-w-xs truncate">
                         "{c.message}"
@@ -343,6 +442,38 @@ const CustomVideoPlayer = forwardRef(function CustomVideoPlayer(
               <span className="text-slate-500 mx-1">/</span>
               <span className="text-slate-400">{formatTime(duration)}</span>
             </div>
+          </div>
+
+          {/* Middle: Annotate Frame Button */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!isAnnotating) {
+                  if (videoRef.current) {
+                    videoRef.current.pause();
+                    setIsPlaying(false);
+                  }
+                  if (setIsAnnotating) setIsAnnotating(true);
+                } else {
+                  if (setIsAnnotating) setIsAnnotating(false);
+                }
+              }}
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-all active:scale-95 ${
+                isAnnotating
+                  ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white shadow-glow'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700'
+              }`}
+              title="Draw visual markings on current frame"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{isAnnotating ? 'Close Markup' : 'Annotate Frame'}</span>
+              {activeShapes && activeShapes.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-[10px] font-mono font-bold">
+                  {activeShapes.length}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Right Controls: Speed, Volume, Fullscreen */}

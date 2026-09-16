@@ -1,4 +1,7 @@
+const path = require('path');
+const fs = require('fs');
 const Comment = require('../models/Comment');
+const Annotation = require('../models/Annotation');
 const Video = require('../models/Video');
 const Project = require('../models/Project');
 const Activity = require('../models/Activity');
@@ -28,6 +31,7 @@ const getVideoComments = async (req, res, next) => {
     })
       .populate('userId', 'name email avatar role')
       .populate('resolvedBy', 'name email avatar role')
+      .populate('annotationId')
       .sort({ timestamp: 1, createdAt: 1 });
 
     // Fetch replies for these comments
@@ -97,12 +101,27 @@ const getProjectComments = async (req, res, next) => {
 const createVideoComment = async (req, res, next) => {
   try {
     const { videoId } = req.params;
-    const { timestamp, message } = req.body;
+    let { timestamp, message, shapes, voiceNoteDuration } = req.body;
 
-    if (timestamp === undefined || !message) {
+    if (typeof shapes === 'string') {
+      try {
+        shapes = JSON.parse(shapes);
+      } catch (e) {
+        shapes = [];
+      }
+    }
+
+    const hasAudio = !!req.file;
+    const finalMessage = message?.trim() || (hasAudio ? '🎙️ Voice note attached' : '');
+
+    if (
+      timestamp === undefined ||
+      (!finalMessage && !hasAudio && (!shapes || shapes.length === 0))
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Timestamp and comment message are required',
+        message:
+          'Timestamp and feedback message, voice note, or visual markup are required',
       });
     }
 
@@ -115,15 +134,34 @@ const createVideoComment = async (req, res, next) => {
     }
 
     const parsedTimestamp = Math.max(0, parseFloat(timestamp));
+    const parsedDuration = parseFloat(voiceNoteDuration || 0);
 
     const comment = await Comment.create({
       videoId: video._id,
       projectId: video.projectId,
       userId: req.user._id,
       timestamp: Math.round(parsedTimestamp * 100) / 100,
-      message,
+      message: finalMessage,
       status: 'OPEN',
+      hasVoiceNote: hasAudio,
+      voiceNoteUrl: hasAudio ? `/uploads/audio/${req.file.filename}` : null,
+      voiceNoteDuration: parsedDuration,
     });
+
+    let annotation = null;
+    if (shapes && Array.isArray(shapes) && shapes.length > 0) {
+      annotation = await Annotation.create({
+        videoId: video._id,
+        projectId: video.projectId,
+        commentId: comment._id,
+        userId: req.user._id,
+        timestamp: Math.round(parsedTimestamp * 100) / 100,
+        shapes,
+      });
+      comment.hasAnnotation = true;
+      comment.annotationId = annotation._id;
+      await comment.save();
+    }
 
     // Create activity log
     const timeStr = formatTime(parsedTimestamp);
@@ -156,7 +194,8 @@ const createVideoComment = async (req, res, next) => {
 
     const populated = await Comment.findById(comment._id)
       .populate('userId', 'name email avatar role')
-      .populate('resolvedBy', 'name email avatar role');
+      .populate('resolvedBy', 'name email avatar role')
+      .populate('annotationId');
 
     const payload = {
       ...populated.toObject(),
@@ -165,11 +204,13 @@ const createVideoComment = async (req, res, next) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`project:${video.projectId}`).emit('new_comment', {
+      const emitData = {
         projectId: video.projectId,
         videoId: video._id,
         comment: payload,
-      });
+      };
+      io.to(`project:${video.projectId}`).emit('new_comment', emitData);
+      io.to(`video:${video._id}`).emit('new_comment', emitData);
     }
 
     res.status(201).json({
@@ -249,10 +290,13 @@ const replyToComment = async (req, res, next) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`project:${parent.projectId}`).emit('new_reply', {
+      const replyData = {
         parentCommentId: parent._id,
+        videoId: parent.videoId,
         reply: populatedReply,
-      });
+      };
+      io.to(`project:${parent.projectId}`).emit('new_reply', replyData);
+      io.to(`video:${parent.videoId}`).emit('new_reply', replyData);
     }
 
     res.status(201).json({
@@ -324,12 +368,16 @@ const toggleResolveComment = async (req, res, next) => {
 
     const io = req.app.get('io');
     if (io) {
-      io.to(`project:${comment.projectId}`).emit('comment_resolved', {
+      const vidId = comment.videoId?._id || comment.videoId;
+      const resolveData = {
         commentId: comment._id,
+        videoId: vidId,
         status: comment.status,
         resolvedBy: populated.resolvedBy,
         resolvedAt: populated.resolvedAt,
-      });
+      };
+      io.to(`project:${comment.projectId}`).emit('comment_resolved', resolveData);
+      io.to(`video:${vidId}`).emit('comment_resolved', resolveData);
     }
 
     res.status(200).json({
@@ -371,10 +419,30 @@ const deleteComment = async (req, res, next) => {
 
     const timeStr = formatTime(comment.timestamp);
 
-    // Delete comment and its replies
-    await Comment.deleteMany({
-      $or: [{ _id: comment._id }, { parentCommentId: comment._id }],
-    });
+    // Delete voice note audio file if present
+    if (comment.voiceNoteUrl) {
+      const audioPath = path.join(__dirname, '../../', comment.voiceNoteUrl);
+      if (fs.existsSync(audioPath)) {
+        try {
+          fs.unlinkSync(audioPath);
+        } catch (e) {
+          console.error('Failed to unlink audio note:', e);
+        }
+      }
+    }
+
+    // Delete comment and its replies, and any linked annotations
+    await Promise.all([
+      Comment.deleteMany({
+        $or: [{ _id: comment._id }, { parentCommentId: comment._id }],
+      }),
+      Annotation.deleteMany({
+        $or: [
+          { commentId: comment._id },
+          { videoId: comment.videoId, timestamp: comment.timestamp },
+        ],
+      }),
+    ]);
 
     // Log Activity
     await Activity.create({
@@ -384,9 +452,44 @@ const deleteComment = async (req, res, next) => {
       message: `${req.user.name} removed feedback at ${timeStr}`,
     });
 
+    const io = req.app.get('io');
+    if (io) {
+      const deleteData = {
+        commentId: comment._id,
+        videoId: comment.videoId,
+        projectId: comment.projectId,
+        timestamp: comment.timestamp,
+      };
+      io.to(`project:${comment.projectId}`).emit('comment_deleted', deleteData);
+      io.to(`video:${comment.videoId}`).emit('comment_deleted', deleteData);
+    }
+
     res.status(200).json({
       success: true,
       message: 'Comment removed successfully',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * @desc    Upload standalone voice note
+ * @route   POST /api/comments/upload-audio
+ * @access  Private
+ */
+const uploadVoiceNote = async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Audio file is required' });
+    }
+    res.status(200).json({
+      success: true,
+      data: {
+        voiceNoteUrl: `/uploads/audio/${req.file.filename}`,
+        filename: req.file.filename,
+        size: req.file.size,
+      },
     });
   } catch (error) {
     next(error);
@@ -400,4 +503,5 @@ module.exports = {
   replyToComment,
   toggleResolveComment,
   deleteComment,
+  uploadVoiceNote,
 };

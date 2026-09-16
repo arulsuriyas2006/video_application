@@ -1,10 +1,16 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const path = require('path');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Client = require('../models/Client');
 const Project = require('../models/Project');
+const Video = require('../models/Video');
+const Comment = require('../models/Comment');
+const Annotation = require('../models/Annotation');
 const Activity = require('../models/Activity');
+const Notification = require('../models/Notification');
+const ReviewLink = require('../models/ReviewLink');
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
@@ -18,7 +24,12 @@ const seedDB = async () => {
     await User.deleteMany({});
     await Client.deleteMany({});
     await Project.deleteMany({});
+    await Video.deleteMany({});
+    await Comment.deleteMany({});
+    await Annotation.deleteMany({});
     await Activity.deleteMany({});
+    await Notification.deleteMany({});
+    await ReviewLink.deleteMany({});
     console.log('[Seed] Cleared existing collections');
 
     // 1. Create Users
@@ -85,7 +96,7 @@ const seedDB = async () => {
     const p1 = await Project.create({
       name: 'Nike Summer Campaign - 60s Hero',
       description: 'Cinematic brand campaign spot showcasing urban athletics and dynamic motion typography.',
-      brief: 'Deliver high-octane visual pacing with quick match cuts. The color grade needs high contrast neon accents. Music track must sync to footfalls at 00:15 and 00:32.',
+      brief: 'Deliver high-octane visual pacing with quick match cuts. The color grade needs high contrast neon accents. Music track must sync to footfalls at 00:04 and 00:09.',
       clientId: client1._id,
       assignedEditorId: editor._id,
       status: 'IN_REVIEW',
@@ -132,7 +143,136 @@ const seedDB = async () => {
 
     console.log('[Seed] Created 4 Projects');
 
-    // 4. Create Activities
+    // 4. Create Video Cuts for Project 1
+    const v1 = await Video.create({
+      projectId: p1._id,
+      versionNumber: 1,
+      title: 'Nike Summer Campaign - Rough Assembly V1',
+      originalFileName: 'nike_rough_assembly.mp4',
+      filePath: '/uploads/videos/video-1789492324778-462306357.mp4',
+      thumbnailPath: '',
+      duration: 15.4,
+      width: 1920,
+      height: 1080,
+      fileSize: 4820000,
+      uploadedBy: editor._id,
+      status: 'CHANGES_REQUESTED',
+    });
+
+    const v2 = await Video.create({
+      projectId: p1._id,
+      versionNumber: 2,
+      title: 'Nike Summer Campaign - Color Graded V2',
+      originalFileName: 'nike_color_graded_v2.mp4',
+      filePath: '/uploads/videos/video-1789492327050-533212147.mp4',
+      thumbnailPath: '',
+      duration: 15.4,
+      width: 1920,
+      height: 1080,
+      fileSize: 5240000,
+      uploadedBy: editor._id,
+      status: 'IN_REVIEW',
+    });
+
+    console.log('[Seed] Created Video Cuts (V1 & V2)');
+
+    // 5. Create Comments & Threaded Replies on V2
+    const comment1 = await Comment.create({
+      videoId: v2._id,
+      projectId: p1._id,
+      userId: clientUser._id,
+      timestamp: 2.5,
+      message: 'The motion title text enters slightly too early. Can we delay the entrance by 0.5s?',
+      status: 'OPEN',
+      hasAnnotation: true,
+    });
+
+    // Create Annotation linked to comment 1
+    const annotation1 = await Annotation.create({
+      videoId: v2._id,
+      projectId: p1._id,
+      commentId: comment1._id,
+      userId: clientUser._id,
+      timestamp: 2.5,
+      shapes: [
+        {
+          type: 'RECTANGLE',
+          color: '#f59e0b',
+          strokeWidth: 3,
+          rect: { x: 0.25, y: 0.3, width: 0.5, height: 0.25 },
+        },
+        {
+          type: 'ARROW',
+          color: '#ef4444',
+          strokeWidth: 3,
+          arrow: { startX: 0.15, startY: 0.42, endX: 0.25, endY: 0.42 },
+        },
+      ],
+    });
+
+    comment1.annotationId = annotation1._id;
+    await comment1.save();
+
+    // Editor Reply to Comment 1
+    await Comment.create({
+      videoId: v2._id,
+      projectId: p1._id,
+      userId: editor._id,
+      parentCommentId: comment1._id,
+      timestamp: 2.5,
+      message: 'Got it Sarah! Adjusted the keyframe in After Effects. Timing feels much punchier now.',
+      status: 'OPEN',
+    });
+
+    // Comment 2 (Resolved)
+    const comment2 = await Comment.create({
+      videoId: v2._id,
+      projectId: p1._id,
+      userId: admin._id,
+      timestamp: 7.8,
+      message: 'Color grading on the athlete looks exceptional with the teal & orange contrast.',
+      status: 'RESOLVED',
+      resolvedBy: editor._id,
+      resolvedAt: new Date(),
+    });
+
+    // Comment 3 (Voice note demo indicator)
+    const comment3 = await Comment.create({
+      videoId: v2._id,
+      projectId: p1._id,
+      userId: clientUser._id,
+      timestamp: 12.0,
+      message: '🎙️ Voice note attached: Sound mix balancing notes for the closing brand tagline.',
+      status: 'OPEN',
+      hasVoiceNote: true,
+      voiceNoteDuration: 8.4,
+    });
+
+    console.log('[Seed] Created Comments, Replies, Annotations & Voice Notes');
+
+    // 6. Create Pre-Seeded Client Review Link for Instant Testing
+    const salt = await bcrypt.genSalt(10);
+    const passcodeHash = await bcrypt.hash('Client2026!', salt);
+
+    const reviewLink = await ReviewLink.create({
+      token: 'nike-hero-cut-review-2026',
+      videoId: v2._id,
+      projectId: p1._id,
+      createdBy: editor._id,
+      title: 'Nike Summer Campaign V2 — Client Sign-Off',
+      allowComments: true,
+      allowDownload: true,
+      requirePasscode: true,
+      passcodeHash,
+      expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000), // 14 days
+      isActive: true,
+      viewsCount: 3,
+      approvalStatus: 'PENDING',
+    });
+
+    console.log('[Seed] Created Client Review Link: /review/share/nike-hero-cut-review-2026 (Passcode: Client2026!)');
+
+    // 7. Create Activities
     await Activity.create([
       {
         projectId: p1._id,
@@ -147,6 +287,24 @@ const seedDB = async () => {
         message: 'Assigned editor Marcus Chen to "Nike Summer Campaign - 60s Hero"',
       },
       {
+        projectId: p1._id,
+        userId: editor._id,
+        type: 'NEW_VERSION_UPLOADED',
+        message: 'Marcus Chen uploaded "Nike Summer Campaign - Color Graded V2"',
+      },
+      {
+        projectId: p1._id,
+        userId: clientUser._id,
+        type: 'COMMENT_CREATED',
+        message: 'Sarah Jenkins added feedback at 00:02: "The motion title text enters slightly too early..."',
+      },
+      {
+        projectId: p1._id,
+        userId: editor._id,
+        type: 'REPLY_ADDED',
+        message: 'Marcus Chen replied: "Got it Sarah! Adjusted the keyframe in After Effects."',
+      },
+      {
         projectId: p3._id,
         userId: clientUser._id,
         type: 'CHANGES_REQUESTED',
@@ -158,25 +316,43 @@ const seedDB = async () => {
         type: 'VIDEO_APPROVED',
         message: 'Elena Rostova approved final cut of "Quantum AI Keynote Intro Reel"',
       },
+    ]);
+
+    // 8. Create Notifications
+    await Notification.create([
       {
-        projectId: p2._id,
         userId: editor._id,
-        type: 'PROJECT_UPDATED',
-        message: 'Marcus Chen updated project status to IN_PROGRESS',
+        projectId: p1._id,
+        videoId: v2._id,
+        type: 'NEW_COMMENT',
+        message: 'Sarah Jenkins commented on "Nike Summer Campaign - Color Graded V2"',
+      },
+      {
+        userId: clientUser._id,
+        projectId: p1._id,
+        videoId: v2._id,
+        type: 'COMMENT_REPLY',
+        message: 'Marcus Chen replied to your feedback at 00:02',
       },
     ]);
 
-    console.log('[Seed] Created Activities');
+    console.log('[Seed] Created Activities & Notifications');
 
-    console.log('\n=============================================');
-    console.log('✅ VideoFlow Full Seed Data Initialized!');
-    console.log('---------------------------------------------');
-    console.log('ADMIN:  admin@videoflow.local  / AdminPass123!');
-    console.log('EDITOR: editor@videoflow.local / EditorPass123!');
-    console.log('CLIENT: client@videoflow.local / ClientPass123!');
-    console.log('---------------------------------------------');
-    console.log('Clients: 3 | Projects: 4 | Activities: 5');
-    console.log('=============================================\n');
+    console.log('\n==================================================================');
+    console.log('🎉 VIDEOFLOW COMPLETE SEED INITIALIZED SUCCESSFULLY!');
+    console.log('==================================================================');
+    console.log('🔑 TEST ACCOUNTS:');
+    console.log('   👑 Admin:  admin@videoflow.local  / AdminPass123!');
+    console.log('   🎬 Editor: editor@videoflow.local / EditorPass123!');
+    console.log('   💼 Client: client@videoflow.local / ClientPass123!');
+    console.log('------------------------------------------------------------------');
+    console.log('🔗 PUBLIC CLIENT REVIEW LINK (Passcode Protected):');
+    console.log('   URL:      http://localhost:5173/review/share/nike-hero-cut-review-2026');
+    console.log('   Passcode: Client2026!');
+    console.log('------------------------------------------------------------------');
+    console.log('📊 DATA SUMMARY:');
+    console.log(`   Users: 3 | Clients: 3 | Projects: 4 | Videos: 2 cuts | Comments: 3`);
+    console.log('==================================================================\n');
 
     process.exit(0);
   } catch (error) {

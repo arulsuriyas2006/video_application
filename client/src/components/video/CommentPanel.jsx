@@ -14,13 +14,23 @@ import {
   Loader2,
   Trash2,
   ShieldCheck,
-  Film
+  Film,
+  Paintbrush,
+  Mic,
+  Volume2
 } from 'lucide-react';
+import VoiceRecorder from './VoiceRecorder';
+import VoiceNotePlayer from './VoiceNotePlayer';
 
 export default function CommentPanel({
   videoId,
   currentTime,
   comments = [],
+  activeShapes = [],
+  onClearShapes,
+  onOpenAnnotation,
+  activeCommentId,
+  setActiveCommentId,
   onSeekToTimestamp,
   onAddComment,
   onResolveToggle,
@@ -37,6 +47,11 @@ export default function CommentPanel({
   const [replyMessage, setReplyMessage] = useState('');
   const [replySubmitting, setReplySubmitting] = useState(false);
 
+  // Voice note state
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [attachedAudioBlob, setAttachedAudioBlob] = useState(null);
+  const [attachedAudioDuration, setAttachedAudioDuration] = useState(0);
+
   const formatTime = (seconds) => {
     if (!seconds && seconds !== 0) return '00:00';
     const mins = Math.floor(seconds / 60);
@@ -46,22 +61,41 @@ export default function CommentPanel({
       .padStart(2, '0')}`;
   };
 
-  const handleStartComment = () => {
+  const handleStartComment = (startVoice = false) => {
     setCapturedTimestamp(currentTime);
     setIsAddingComment(true);
+    if (startVoice) {
+      setIsRecordingVoice(true);
+    }
   };
 
   const handleSubmitComment = async (e) => {
     e.preventDefault();
-    if (!message.trim()) return;
+    if (
+      !message.trim() &&
+      !attachedAudioBlob &&
+      (!activeShapes || activeShapes.length === 0)
+    ) {
+      return;
+    }
 
     setSubmitting(true);
     try {
-      await onAddComment(capturedTimestamp, message.trim());
+      await onAddComment(
+        capturedTimestamp,
+        message.trim(),
+        activeShapes,
+        attachedAudioBlob,
+        attachedAudioDuration
+      );
       setMessage('');
+      setAttachedAudioBlob(null);
+      setAttachedAudioDuration(0);
+      setIsRecordingVoice(false);
+      if (onClearShapes) onClearShapes();
       setIsAddingComment(false);
     } catch (err) {
-      alert(err.message || 'Failed to post comment');
+      alert(err.message || 'Failed to post feedback');
     } finally {
       setSubmitting(false);
     }
@@ -164,18 +198,48 @@ export default function CommentPanel({
 
       {/* Add Comment Action */}
       {!isAddingComment ? (
-        <button
-          onClick={handleStartComment}
-          className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-brand-500/40 text-xs text-slate-300 transition-all group"
-        >
-          <span className="flex items-center gap-2 text-slate-400 group-hover:text-slate-200">
-            <MessageSquare className="w-3.5 h-3.5 text-brand-400" />
-            <span>Add feedback at</span>
-          </span>
-          <span className="px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/30 text-brand-300 font-mono font-bold">
-            {formatTime(currentTime)}
-          </span>
-        </button>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleStartComment(false)}
+              className="flex-1 flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-900/80 hover:bg-slate-800/90 border border-slate-800 hover:border-brand-500/40 text-xs text-slate-300 transition-all group"
+            >
+              <span className="flex items-center gap-2 text-slate-400 group-hover:text-slate-200">
+                <MessageSquare className="w-3.5 h-3.5 text-brand-400" />
+                <span>Add feedback at</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-md bg-brand-500/10 border border-brand-500/30 text-brand-300 font-mono font-bold">
+                {formatTime(currentTime)}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleStartComment(true)}
+              title="Record Voice Note at current frame"
+              className="px-3 py-2.5 rounded-xl bg-slate-900/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-500/40 transition-all flex items-center gap-1.5 text-xs font-semibold"
+            >
+              <Mic className="w-3.5 h-3.5 text-rose-400" />
+              <span>Voice</span>
+            </button>
+          </div>
+
+          {activeShapes && activeShapes.length > 0 && (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Paintbrush className="w-3.5 h-3.5" />
+                <span>{activeShapes.length} markup shape{activeShapes.length > 1 ? 's' : ''} drawn</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => handleStartComment(false)}
+                className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-bold text-[11px] transition-colors"
+              >
+                Attach & Post
+              </button>
+            </div>
+          )}
+        </div>
       ) : (
         <form
           onSubmit={handleSubmitComment}
@@ -190,27 +254,104 @@ export default function CommentPanel({
             </span>
             <button
               type="button"
-              onClick={() => setIsAddingComment(false)}
+              onClick={() => {
+                setIsAddingComment(false);
+                setIsRecordingVoice(false);
+                setAttachedAudioBlob(null);
+                setAttachedAudioDuration(0);
+              }}
               className="text-[11px] text-slate-500 hover:text-slate-300"
             >
               Cancel
             </button>
           </div>
 
+          {/* Voice Recorder Overlay inside Form */}
+          {isRecordingVoice && (
+            <VoiceRecorder
+              onAudioReady={(blob, dur) => {
+                setAttachedAudioBlob(blob);
+                setAttachedAudioDuration(dur);
+                setIsRecordingVoice(false);
+              }}
+              onCancel={() => setIsRecordingVoice(false)}
+            />
+          )}
+
+          {/* Attached Voice Note Chip */}
+          {attachedAudioBlob && !isRecordingVoice && (
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[11px]">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Mic className="w-3.5 h-3.5" />
+                <span>Voice note attached ({formatTime(attachedAudioDuration)})</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttachedAudioBlob(null);
+                  setAttachedAudioDuration(0);
+                }}
+                className="text-[10px] text-slate-400 hover:text-rose-400 underline transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          {/* Attached Markup Chip */}
+          {activeShapes && activeShapes.length > 0 && (
+            <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[11px]">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <Paintbrush className="w-3.5 h-3.5" />
+                <span>{activeShapes.length} visual markup shape{activeShapes.length > 1 ? 's' : ''} attached</span>
+              </span>
+              {onClearShapes && (
+                <button
+                  type="button"
+                  onClick={onClearShapes}
+                  className="text-[10px] text-slate-400 hover:text-rose-400 underline transition-colors"
+                >
+                  Clear markup
+                </button>
+              )}
+            </div>
+          )}
+
           <textarea
-            required
             autoFocus
-            rows={3}
+            rows={2}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Describe required edits: typography, color, audio cue, cut timing..."
+            placeholder={
+              attachedAudioBlob
+                ? 'Optional: Add written notes to accompany your voice feedback...'
+                : 'Describe required edits: typography, color, audio cue, cut timing...'
+            }
             className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 focus:border-brand-500 outline-none text-xs text-slate-200 placeholder:text-slate-600 resize-none leading-relaxed"
           />
 
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex items-center justify-between pt-1">
+            {!attachedAudioBlob && !isRecordingVoice ? (
+              <button
+                type="button"
+                onClick={() => setIsRecordingVoice(true)}
+                className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-rose-300 font-medium transition-colors"
+              >
+                <Mic className="w-3.5 h-3.5 text-rose-400" />
+                <span>Attach Voice Note</span>
+              </button>
+            ) : (
+              <div />
+            )}
+
             <button
               type="submit"
-              disabled={submitting || !message.trim()}
+              disabled={
+                submitting ||
+                (!message.trim() &&
+                  !attachedAudioBlob &&
+                  (!activeShapes || activeShapes.length === 0))
+              }
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs shadow-glow active:scale-95 transition-all disabled:opacity-50"
             >
               {submitting ? (
@@ -237,11 +378,19 @@ export default function CommentPanel({
         ) : (
           filteredComments.map((c) => {
             const isResolved = c.status === 'RESOLVED';
+            const hasMarkup = c.hasAnnotation || c.annotationId;
+            const isSelected = activeCommentId === c._id;
+
             return (
               <div
                 key={c._id}
-                className={`p-3.5 rounded-xl border transition-all space-y-2.5 ${
-                  isResolved
+                onClick={() => {
+                  if (setActiveCommentId) setActiveCommentId(c._id);
+                }}
+                className={`p-3.5 rounded-xl border transition-all space-y-2.5 cursor-pointer ${
+                  isSelected
+                    ? 'border-brand-500 bg-slate-900 shadow-glow'
+                    : isResolved
                     ? 'bg-slate-950/40 border-slate-900/80 opacity-60 hover:opacity-100'
                     : 'bg-slate-900/60 border-slate-800/80 hover:border-slate-700'
                 }`}
@@ -266,6 +415,12 @@ export default function CommentPanel({
                     <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
                       <span>{c.userId?.name}</span>
                       {getRolePill(c.userId?.role)}
+                      {c.hasVoiceNote && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-0.5">
+                          <Mic className="w-2.5 h-2.5" />
+                          <span>Voice</span>
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -297,22 +452,51 @@ export default function CommentPanel({
                 </div>
 
                 {/* Comment Text */}
-                <p
-                  className={`text-xs leading-relaxed ${
-                    isResolved
-                      ? 'line-through text-slate-500'
-                      : 'text-slate-200'
-                  }`}
-                >
-                  {c.message}
-                </p>
+                {c.message && (
+                  <p
+                    className={`text-xs leading-relaxed ${
+                      isResolved
+                        ? 'line-through text-slate-500'
+                        : 'text-slate-200'
+                    }`}
+                  >
+                    {c.message}
+                  </p>
+                )}
 
-                {/* Resolution meta */}
-                {isResolved && c.resolvedBy && (
-                  <div className="text-[10px] text-emerald-400/80 font-medium">
-                    Resolved by {c.resolvedBy.name}
+                {/* Voice Note Player */}
+                {c.hasVoiceNote && c.voiceNoteUrl && (
+                  <div className="pt-0.5">
+                    <VoiceNotePlayer
+                      src={c.voiceNoteUrl}
+                      duration={c.voiceNoteDuration}
+                    />
                   </div>
                 )}
+
+                {/* Resolution meta & Markup Tag */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {isResolved && c.resolvedBy && (
+                    <div className="text-[10px] text-emerald-400/80 font-medium">
+                      Resolved by {c.resolvedBy.name}
+                    </div>
+                  )}
+
+                  {hasMarkup && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSeekToTimestamp(c.timestamp);
+                        if (setActiveCommentId) setActiveCommentId(c._id);
+                      }}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-semibold text-[10px] transition-all"
+                    >
+                      <Paintbrush className="w-2.5 h-2.5" />
+                      <span>View Visual Markup</span>
+                    </button>
+                  )}
+                </div>
 
                 {/* Nested Threaded Replies */}
                 {c.replies && c.replies.length > 0 && (

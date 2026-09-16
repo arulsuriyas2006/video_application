@@ -8,7 +8,7 @@ const {
   deleteVideo,
 } = require('../controllers/videoController');
 const { protect, authorize } = require('../middleware/authMiddleware');
-const { uploadVideo } = require('../middleware/uploadMiddleware');
+const { uploadVideo, uploadAudio } = require('../middleware/uploadMiddleware');
 
 router.use(protect);
 
@@ -32,13 +32,24 @@ const {
   createVideoComment,
 } = require('../controllers/commentController');
 
+const {
+  getVideoAnnotations,
+  createAnnotation,
+} = require('../controllers/annotationController');
+
 // Versions listing
 router.get('/project/:projectId', getProjectVersions);
 
-// Video Comments
+// Video Comments (supports text, annotations, and voice notes)
 router
   .route('/:videoId/comments')
   .get(getVideoComments)
-  .post(createVideoComment);
+  .post(uploadAudio.single('audio'), createVideoComment);
+
+// Video Annotations
+router
+  .route('/:videoId/annotations')
+  .get(getVideoAnnotations)
+  .post(createAnnotation);
 
 module.exports = router;

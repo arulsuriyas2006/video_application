@@ -17,7 +17,16 @@ const commentSchema = new mongoose.Schema(
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: false,
+      default: null,
+    },
+    authorName: {
+      type: String,
+      default: null,
+    },
+    isGuest: {
+      type: Boolean,
+      default: false,
     },
     timestamp: {
       type: Number,
@@ -27,8 +36,8 @@ const commentSchema = new mongoose.Schema(
     },
     message: {
       type: String,
-      required: [true, 'Please enter a feedback message'],
       trim: true,
+      default: '',
       maxlength: [2000, 'Comment cannot exceed 2000 characters'],
     },
     status: {
@@ -50,6 +59,27 @@ const commentSchema = new mongoose.Schema(
       ref: 'Comment',
       default: null,
       index: true,
+    },
+    hasAnnotation: {
+      type: Boolean,
+      default: false,
+    },
+    annotationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Annotation',
+      default: null,
+    },
+    hasVoiceNote: {
+      type: Boolean,
+      default: false,
+    },
+    voiceNoteUrl: {
+      type: String,
+      default: null,
+    },
+    voiceNoteDuration: {
+      type: Number,
+      default: 0,
     },
   },
   {

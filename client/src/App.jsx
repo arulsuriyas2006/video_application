@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { SocketProvider } from './context/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -11,6 +12,8 @@ import Projects from './pages/Projects';
 import ProjectForm from './pages/ProjectForm';
 import ProjectDetail from './pages/ProjectDetail';
 import VideoReview from './pages/VideoReview';
+import VersionCompare from './pages/VersionCompare';
+import PublicReview from './pages/PublicReview';
 import Health from './pages/Health';
 
 function RootRedirect() {
@@ -23,7 +26,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
+        <SocketProvider>
+          <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
@@ -100,10 +104,24 @@ export default function App() {
             }
           />
 
+          {/* Version Comparison Workspace */}
+          <Route
+            path="/compare/:projectId/:v1Id/:v2Id"
+            element={
+              <ProtectedRoute>
+                <VersionCompare />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Public Client Review Portal (No Auth Required) */}
+          <Route path="/review/share/:token" element={<PublicReview />} />
+
           <Route path="/health" element={<Health />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+      </SocketProvider>
+    </AuthProvider>
+  </BrowserRouter>
   );
 }

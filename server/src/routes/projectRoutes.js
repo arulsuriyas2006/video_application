@@ -25,9 +25,11 @@ router
 
 const { getProjectVersions } = require('../controllers/videoController');
 const { getProjectComments } = require('../controllers/commentController');
+const { compareVersions } = require('../controllers/versionController');
 
 router.route('/:id/activities').get(getProjectActivities);
 router.route('/:projectId/versions').get(getProjectVersions);
 router.route('/:projectId/comments').get(getProjectComments);
+router.route('/:projectId/compare').get(compareVersions);
 
 module.exports = router;

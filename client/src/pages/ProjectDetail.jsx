@@ -27,7 +27,8 @@ import {
   FileVideo,
   ExternalLink,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Columns
 } from 'lucide-react';
 
 export default function ProjectDetail() {
@@ -506,15 +507,28 @@ export default function ProjectDetail() {
                   </p>
                 </div>
 
-                {canUpload && (
-                  <button
-                    onClick={() => setIsUploadModalOpen(true)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-glow active:scale-95 transition-all"
-                  >
-                    <UploadCloud className="w-4 h-4" />
-                    <span>Upload New Cut</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2.5">
+                  {versions.length >= 2 && (
+                    <Link
+                      to={`/compare/${project._id}/${versions[1]._id}/${versions[0]._id}`}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-brand-500/40 text-slate-300 hover:text-white font-semibold text-xs transition-all shadow-sm"
+                      title="Compare Latest Video Cuts"
+                    >
+                      <Columns className="w-4 h-4 text-brand-400" />
+                      <span>Compare Versions</span>
+                    </Link>
+                  )}
+
+                  {canUpload && (
+                    <button
+                      onClick={() => setIsUploadModalOpen(true)}
+                      className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-semibold text-xs shadow-glow active:scale-95 transition-all"
+                    >
+                      <UploadCloud className="w-4 h-4" />
+                      <span>Upload New Cut</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {versionsLoading ? (
